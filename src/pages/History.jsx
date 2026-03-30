@@ -133,14 +133,22 @@ function SessionDetail({ session }) {
   );
 }
 
-function SessionCard({ session }) {
+function SessionCard({ session, onDelete }) {
   const [expanded, setExpanded] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const handleToggle = () => {
+    setExpanded((v) => {
+      if (v) setConfirmingDelete(false);
+      return !v;
+    });
+  };
 
   return (
     <div className="card p-4 transition-all duration-200">
       <button
         className="w-full text-left"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={handleToggle}
       >
         <div className="flex items-start justify-between gap-3">
           {/* Left: Session number + date */}
@@ -202,12 +210,44 @@ function SessionCard({ session }) {
         </div>
       </button>
 
-      {expanded && <SessionDetail session={session} />}
+      {expanded && (
+        <>
+          <SessionDetail session={session} />
+          <div className="flex items-center gap-3 pt-3 border-t border-white/[0.06]">
+            {confirmingDelete ? (
+              <>
+                <button
+                  type="button"
+                  className="text-xs text-red-400"
+                  onClick={() => onDelete(session.session_number)}
+                >
+                  Tap again to confirm delete
+                </button>
+                <button
+                  type="button"
+                  className="text-xs text-slate-500"
+                  onClick={() => setConfirmingDelete(false)}
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="text-xs text-slate-500 hover:text-red-400"
+                onClick={() => setConfirmingDelete(true)}
+              >
+                Delete Session
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-export default function History({ sessions }) {
+export default function History({ sessions, onSessionDeleted }) {
   const sorted = [...sessions].sort((a, b) => b.session_number - a.session_number);
 
   if (sorted.length === 0) {
@@ -242,7 +282,7 @@ export default function History({ sessions }) {
 
       <div className="px-4 flex flex-col gap-3">
         {sorted.map((session) => (
-          <SessionCard key={session.session_number} session={session} />
+          <SessionCard key={session.session_number} session={session} onDelete={onSessionDeleted} />
         ))}
       </div>
     </div>

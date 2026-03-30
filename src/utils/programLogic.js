@@ -76,8 +76,12 @@ export function isPhaseEndSession(sessionNumber) {
  */
 export function getNextSessionNumber(sessions) {
   if (!sessions || sessions.length === 0) return 1;
-  const maxNum = Math.max(...sessions.map((s) => s.session_number));
-  return maxNum + 1;
+  const existing = new Set(sessions.map((s) => s.session_number));
+  let next = 1;
+  while (existing.has(next)) {
+    next++;
+  }
+  return next;
 }
 
 /**

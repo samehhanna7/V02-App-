@@ -43,6 +43,17 @@ export function appendSession(session) {
 }
 
 /**
+ * Delete a session by session_number and persist the updated array.
+ * Returns the updated array.
+ */
+export function deleteSession(sessionNumber) {
+  const sessions = loadSessions();
+  const updated = sessions.filter((s) => s.session_number !== sessionNumber);
+  saveSessions(updated);
+  return updated;
+}
+
+/**
  * Get the most recent session or null.
  */
 export function getLastSession(sessions) {

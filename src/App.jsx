@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { loadSessions } from './utils/storage';
+import { loadSessions, deleteSession } from './utils/storage';
 import BottomNav from './components/BottomNav';
 import Toast from './components/Toast';
 import Dashboard from './pages/Dashboard';
@@ -24,6 +24,12 @@ export default function App() {
       type: 'success',
     });
     setActiveTab('dashboard');
+  }, [refreshSessions]);
+
+  const handleSessionDeleted = useCallback((sessionNumber) => {
+    deleteSession(sessionNumber);
+    refreshSessions();
+    setToast({ message: `Session #${sessionNumber} deleted.`, type: 'success' });
   }, [refreshSessions]);
 
   const handleTabChange = useCallback((tab) => {
@@ -62,7 +68,7 @@ export default function App() {
           />
         )}
         {activeTab === 'history' && (
-          <History sessions={sessions} />
+          <History sessions={sessions} onSessionDeleted={handleSessionDeleted} />
         )}
         {activeTab === 'program' && (
           <Program />
