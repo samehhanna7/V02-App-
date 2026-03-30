@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   getNextSessionNumber,
   getPhaseForSession,
@@ -11,6 +11,8 @@ import {
 import { appendSession } from '../utils/storage';
 import { validateSession } from '../utils/validation';
 import { HR_ZONES } from '../data/zones';
+import { extractSessionData } from '../utils/extractSessionData';
+import { generateCoachingFeedback } from '../utils/generateCoachingFeedback';
 
 const today = () => new Date().toISOString().split('T')[0];
 
@@ -76,11 +78,134 @@ function FormSection({ children, className = '' }) {
   );
 }
 
+// ── helper: read a File as a base64 string (no data-URL prefix) ──────────────
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      // result is "data:<mime>;base64,<data>" — strip the prefix
+      const b64 = reader.result.split(',')[1];
+      resolve(b64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// ── upload zone sub-component ─────────────────────────────────────────────────
+function UploadZone({ label, subtitle, file, onFile, onClear }) {
+  const inputRef = useRef(null);
+  const previewUrl = file ? URL.createObjectURL(file) : null;
+
+  return (
+    <div className="flex-1 min-w-0">
+      <p className="text-sm font-medium text-white mb-0.5">{label}</p>
+      <p className="text-xs text-slate-500 mb-2">{subtitle}</p>
+      {file ? (
+        <div className="relative border-2 border-slate-700 rounded-xl overflow-hidden" style={{ minHeight: 100 }}>
+          <img src={previewUrl} alt={label} className="w-full object-cover rounded-xl" style={{ maxHeight: 160 }} />
+          <button
+            type="button"
+            onClick={onClear}
+            className="absolute top-1.5 right-1.5 bg-bg-primary/80 rounded-full w-6 h-6 flex items-center justify-center text-slate-300 hover:text-white"
+            aria-label="Remove image"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="w-full border-dashed border-2 border-slate-700 rounded-xl flex flex-col items-center justify-center gap-1.5 py-5 text-slate-500 hover:border-slate-500 hover:text-slate-400 transition-colors"
+          style={{ minHeight: 100 }}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" />
+            <polyline points="21 15 16 10 5 21" />
+          </svg>
+          <span className="text-xs">Tap to upload</span>
+        </button>
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/heic,image/*"
+        className="hidden"
+        onChange={(e) => { if (e.target.files[0]) onFile(e.target.files[0]); }}
+      />
+    </div>
+  );
+}
+
+// ── saved screen ──────────────────────────────────────────────────────────────
+function SessionSavedScreen({ session, feedbackState, feedbackText, feedbackError, onBack }) {
+  return (
+    <div className="flex flex-col gap-4 pb-4 animate-fade-in px-4 pt-6">
+      {/* checkmark + heading */}
+      <div className="flex flex-col items-center gap-3 py-6">
+        <div className="w-14 h-14 rounded-full bg-emerald-500/15 flex items-center justify-center">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        </div>
+        <h2 className="text-xl font-bold text-white">Session #{session.session_number} Saved</h2>
+      </div>
+
+      {/* coach feedback card */}
+      <div className="card p-4">
+        <h3 className="text-sm font-semibold text-white mb-3">Coach Feedback</h3>
+        {feedbackState === 'loading' && (
+          <div className="flex items-center gap-2 text-slate-400 text-sm">
+            <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+            </svg>
+            Dr. Reid is reviewing your session...
+          </div>
+        )}
+        {feedbackState === 'done' && (
+          <div className="flex flex-col gap-3">
+            {feedbackText.split('\n\n').filter(Boolean).map((para, i) => (
+              <p key={i} className="text-sm text-slate-300 leading-relaxed">{para}</p>
+            ))}
+          </div>
+        )}
+        {feedbackState === 'error' && (
+          <p className="text-sm text-red-400">Feedback unavailable — check your API key and try again.</p>
+        )}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => onBack(session)}
+        className="btn-primary w-full py-4 text-base mt-1"
+      >
+        Back to Dashboard
+      </button>
+    </div>
+  );
+}
+
 export default function LogSession({ sessions, onSessionSaved }) {
   const [form, setForm] = useState(() => buildInitialForm(sessions));
   const [errors, setErrors] = useState({});
   const [warnings, setWarnings] = useState([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // ── screenshot import state ────────────────────────────────────────────────
+  const [apiKey, setApiKey] = useState('');
+  const [summaryFile, setSummaryFile] = useState(null);
+  const [zonesFile, setZonesFile] = useState(null);
+  const [extracting, setExtracting] = useState(false);
+  const [extractSuccess, setExtractSuccess] = useState(false);
+  const [extractError, setExtractError] = useState(false);
+
+  // ── post-save coaching state ───────────────────────────────────────────────
+  const [savedSession, setSavedSession] = useState(null);
+  const [feedbackState, setFeedbackState] = useState('loading'); // 'loading' | 'done' | 'error'
+  const [feedbackText, setFeedbackText] = useState('');
 
   // Rebuild form if sessions change (e.g., after navigating away and back)
   useEffect(() => {
@@ -113,6 +238,34 @@ export default function LogSession({ sessions, onSessionSaved }) {
       );
       return { ...f, recovery_data: updated };
     });
+  };
+
+  const handleExtract = async () => {
+    if (!summaryFile || !zonesFile || !apiKey) return;
+    setExtracting(true);
+    setExtractSuccess(false);
+    setExtractError(false);
+    try {
+      const [summaryB64, zonesB64] = await Promise.all([
+        fileToBase64(summaryFile),
+        fileToBase64(zonesFile),
+      ]);
+      const extracted = await extractSessionData(summaryB64, zonesB64, apiKey);
+      const fields = [
+        'total_duration_min', 'avg_hr_bpm', 'peak_hr_bpm',
+        'zone1_min', 'zone2_min', 'zone3_min', 'zone4_min', 'zone5_min',
+      ];
+      fields.forEach((field) => {
+        if (extracted[field] !== null && extracted[field] !== undefined) {
+          set(field, String(extracted[field]));
+        }
+      });
+      setExtractSuccess(true);
+    } catch {
+      setExtractError(true);
+    } finally {
+      setExtracting(false);
+    }
   };
 
   const handleSubmit = (e) => {
@@ -197,7 +350,20 @@ export default function LogSession({ sessions, onSessionSaved }) {
 
     appendSession(session);
     setSubmitting(false);
-    onSessionSaved(session);
+
+    // Show the saved screen immediately, then fire coaching async
+    setSavedSession(session);
+    setFeedbackState('loading');
+
+    const allSessionsNow = [...sessions, session];
+    generateCoachingFeedback(session, allSessionsNow, apiKey)
+      .then((text) => {
+        setFeedbackText(text);
+        setFeedbackState('done');
+      })
+      .catch(() => {
+        setFeedbackState('error');
+      });
   };
 
   const zoneFields = [
@@ -210,6 +376,19 @@ export default function LogSession({ sessions, onSessionSaved }) {
 
   const rpeDescriptions = ['', 'Very Easy', 'Easy', 'Easy-Mod', 'Moderate', 'Moderate', 'Somewhat Hard', 'Hard', 'Very Hard', 'Max-ish', 'Max'];
 
+  // Show saved screen instead of form once a session has been saved
+  if (savedSession) {
+    return (
+      <SessionSavedScreen
+        session={savedSession}
+        feedbackState={feedbackState}
+        feedbackText={feedbackText}
+        feedbackError={feedbackState === 'error'}
+        onBack={onSessionSaved}
+      />
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4 pb-4 animate-fade-in">
       {/* Header */}
@@ -221,6 +400,74 @@ export default function LogSession({ sessions, onSessionSaved }) {
       </div>
 
       <form onSubmit={handleSubmit} className="px-4 flex flex-col gap-4">
+        {/* ── Import from Apple Watch ─────────────────────────────────────── */}
+        <FormSection>
+          <SectionHeader title="Import from Apple Watch" />
+
+          {/* API key input */}
+          <div className="mb-4">
+            <label className="label-text">Anthropic API Key</label>
+            <input
+              type="password"
+              className="input-field"
+              placeholder="sk-ant-..."
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              Your key is used locally and never stored or sent anywhere except the Anthropic API
+            </p>
+          </div>
+
+          {/* Upload zones */}
+          <div className="flex gap-3 mb-4">
+            <UploadZone
+              label="Workout Summary"
+              subtitle="Time, calories, heart rate screen"
+              file={summaryFile}
+              onFile={setSummaryFile}
+              onClear={() => setSummaryFile(null)}
+            />
+            <UploadZone
+              label="Heart Rate Zones"
+              subtitle="Zone breakdown screen"
+              file={zonesFile}
+              onFile={setZonesFile}
+              onClear={() => setZonesFile(null)}
+            />
+          </div>
+
+          {/* Status banners */}
+          {extractSuccess && (
+            <div className="mb-3 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/25">
+              <p className="text-sm text-emerald-400">Data extracted — review and confirm below</p>
+            </div>
+          )}
+          {extractError && (
+            <div className="mb-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/25">
+              <p className="text-sm text-red-400">Could not read screenshots. Please fill in the form manually.</p>
+            </div>
+          )}
+
+          {/* Extract button */}
+          <button
+            type="button"
+            disabled={!summaryFile || !zonesFile || !apiKey || extracting}
+            onClick={handleExtract}
+            className="btn-primary w-full py-3 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {extracting ? (
+              <>
+                <svg className="animate-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+                Extracting...
+              </>
+            ) : (
+              'Extract Data'
+            )}
+          </button>
+        </FormSection>
         {/* Warnings */}
         {warnings.length > 0 && (
           <div className="flex flex-col gap-1.5 p-4 rounded-xl bg-amber-500/10 border border-amber-500/25">
