@@ -25,13 +25,11 @@ If a field cannot be read from the screenshots, set it to null. Return only the 
  * @returns {Promise<object>}          - extracted fields (nulls for unreadable fields)
  */
 export async function extractSessionData(summaryImageBase64, zonesImageBase64, apiKey) {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetch('/.netlify/functions/claude-proxy', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
